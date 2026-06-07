@@ -77,9 +77,46 @@
 
         <section class="settings">
           <div class="field">
-            <label for="voice">VOICE</label>
-            <div class="select-wrap">
-              <select id="voice"></select>
+            <span class="field-label" id="voice-label">VOICE</span>
+            <div class="voice-picker" id="voice-picker">
+              <div
+                id="voice-button"
+                class="vp-trigger"
+                role="combobox"
+                tabindex="0"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="voice-listbox"
+                aria-labelledby="voice-label voice-button"
+              >
+                <span class="vp-current">
+                  <span class="vp-name" id="voice-current-name"></span>
+                  <span class="grade vp-grade" id="voice-current-grade"></span>
+                </span>
+                <span class="vp-caret" aria-hidden="true">▾</span>
+              </div>
+              <div class="vp-pop" id="voice-pop" hidden>
+                <div class="vp-head" aria-hidden="true">
+                  <span class="vp-key">
+                    <span class="grade gA">A</span>
+                    <span class="grade gB">B</span>
+                    <span class="grade gC">C</span>
+                    <span class="grade gD">D</span>
+                    <span class="grade gF">F</span>
+                  </span>
+                  <span class="vp-key-label">training-data quality</span>
+                </div>
+                <div
+                  id="voice-listbox"
+                  class="vp-list"
+                  role="listbox"
+                  aria-label="Voice"
+                ></div>
+                <p class="vp-foot">
+                  Kokoro's estimate of each voice's training data (quality &amp;
+                  quantity), A&nbsp;→&nbsp;F — not a rating of how good it sounds.
+                </p>
+              </div>
             </div>
           </div>
           <div class="field">

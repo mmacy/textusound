@@ -1,5 +1,5 @@
 import "./styles.css";
-import { VOICE_GROUPS, DEFAULT_VOICE } from "./voices.js";
+import { VOICE_GROUPS, DEFAULT_VOICE, gradeScore } from "./voices.js";
 import {
   supportsFsAccess,
   primeMru,
@@ -18,7 +18,12 @@ const $ = (id) => document.getElementById(id);
 const el = {
   text: $("text"),
   charCount: $("char-count"),
-  voice: $("voice"),
+  voicePicker: $("voice-picker"),
+  voiceButton: $("voice-button"),
+  voicePop: $("voice-pop"),
+  voiceList: $("voice-listbox"),
+  voiceCurrentName: $("voice-current-name"),
+  voiceCurrentGrade: $("voice-current-grade"),
   speed: $("speed"),
   speedVal: $("speed-val"),
   generate: $("generate"),
@@ -59,33 +64,270 @@ audio.preload = "auto";
 
 /* ---------- setup ---------- */
 
-function populateVoices() {
+/* ---------- voice picker (accessible select-only combobox) ---------- */
+
+const voiceById = new Map();
+const voiceOrder = []; // option elements in display order, for keyboard nav
+let selectedVoice = DEFAULT_VOICE;
+let pickerOpen = false;
+let activeVoice = null; // keyboard-active option while the list is open
+let typeahead = "";
+let typeaheadTimer = 0;
+
+function tierClass(grade) {
+  const c = grade[0];
+  return "g" + (c === "A" || c === "B" || c === "C" || c === "D" ? c : "F");
+}
+
+function buildVoicePicker() {
   const frag = document.createDocumentFragment();
+  let gi = 0;
   for (const group of VOICE_GROUPS) {
-    const og = document.createElement("optgroup");
-    og.label = group.label;
-    for (const v of group.voices) {
-      const opt = document.createElement("option");
-      opt.value = v.id;
-      opt.textContent = v.name;
-      og.appendChild(opt);
+    const wrap = document.createElement("div");
+    wrap.setAttribute("role", "group");
+    const headId = `vg-${gi++}`;
+    wrap.setAttribute("aria-labelledby", headId);
+
+    const head = document.createElement("div");
+    head.className = "vp-grp";
+    head.id = headId;
+    head.textContent = group.label;
+    wrap.appendChild(head);
+
+    const sorted = [...group.voices].sort(
+      (a, b) =>
+        gradeScore(b.grade) - gradeScore(a.grade) ||
+        a.name.localeCompare(b.name)
+    );
+    for (const v of sorted) {
+      const opt = document.createElement("div");
+      opt.className = "vp-opt";
+      opt.id = `vopt-${v.id}`;
+      opt.dataset.id = v.id;
+      opt.setAttribute("role", "option");
+      opt.setAttribute("aria-selected", "false");
+
+      const name = document.createElement("span");
+      name.className = "vp-opt-name";
+      name.textContent = v.name;
+
+      const grade = document.createElement("span");
+      grade.className = `grade ${tierClass(v.grade)}`;
+      grade.textContent = v.grade;
+
+      opt.append(name, grade);
+      wrap.appendChild(opt);
+
+      voiceById.set(v.id, v);
+      voiceOrder.push(opt);
     }
-    frag.appendChild(og);
+    frag.appendChild(wrap);
   }
-  el.voice.appendChild(frag);
+  el.voiceList.appendChild(frag);
+
+  el.voiceButton.addEventListener("click", () =>
+    pickerOpen ? closePicker() : openPicker()
+  );
+  el.voiceButton.addEventListener("keydown", onTriggerKeydown);
+  el.voiceList.addEventListener("click", onListClick);
+  el.voiceList.addEventListener("pointermove", onListPointerMove);
+  document.addEventListener("pointerdown", onDocPointerDown);
+}
+
+function getVoice() {
+  return selectedVoice;
+}
+
+function setVoice(id, { fromUser = false } = {}) {
+  if (!voiceById.has(id)) id = DEFAULT_VOICE;
+  const changed = id !== selectedVoice;
+
+  const prev = document.getElementById(`vopt-${selectedVoice}`);
+  if (prev) prev.setAttribute("aria-selected", "false");
+  selectedVoice = id;
+  const cur = document.getElementById(`vopt-${id}`);
+  if (cur) cur.setAttribute("aria-selected", "true");
+
+  const v = voiceById.get(id);
+  el.voiceCurrentName.textContent = v.name;
+  el.voiceCurrentGrade.textContent = v.grade;
+  el.voiceCurrentGrade.className = `grade vp-grade ${tierClass(v.grade)}`;
+
+  if (fromUser && changed) {
+    persistPrefs();
+    if (state.gen === "ready") invalidateToIdle();
+  }
+}
+
+function openPicker() {
+  if (pickerOpen) return;
+  pickerOpen = true;
+  el.voicePop.hidden = false;
+  el.voiceButton.setAttribute("aria-expanded", "true");
+  setActive(selectedVoice, { scroll: true });
+}
+
+function closePicker({ focus = true } = {}) {
+  if (!pickerOpen) return;
+  pickerOpen = false;
+  el.voicePop.hidden = true;
+  el.voiceButton.setAttribute("aria-expanded", "false");
+  el.voiceButton.removeAttribute("aria-activedescendant");
+  clearActive();
+  if (focus) el.voiceButton.focus();
+}
+
+function clearActive() {
+  if (activeVoice) {
+    const a = document.getElementById(`vopt-${activeVoice}`);
+    if (a) a.classList.remove("active");
+  }
+  activeVoice = null;
+}
+
+function setActive(id, { scroll = false } = {}) {
+  if (!voiceById.has(id)) return;
+  clearActive();
+  activeVoice = id;
+  const optEl = document.getElementById(`vopt-${id}`);
+  optEl.classList.add("active");
+  el.voiceButton.setAttribute("aria-activedescendant", optEl.id);
+  if (scroll) optEl.scrollIntoView({ block: "nearest" });
+}
+
+function moveActive(delta) {
+  const idx = voiceOrder.findIndex((o) => o.dataset.id === activeVoice);
+  let next = idx < 0 ? 0 : idx + delta;
+  next = Math.max(0, Math.min(voiceOrder.length - 1, next));
+  setActive(voiceOrder[next].dataset.id, { scroll: true });
+}
+
+function setActiveEdge(which) {
+  const o = which === "first" ? voiceOrder[0] : voiceOrder[voiceOrder.length - 1];
+  setActive(o.dataset.id, { scroll: true });
+}
+
+function commitActive() {
+  if (activeVoice) setVoice(activeVoice, { fromUser: true });
+}
+
+function isTypeaheadKey(e) {
+  return (
+    e.key.length === 1 &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.altKey &&
+    /\S/.test(e.key)
+  );
+}
+
+function typeaheadFind(ch) {
+  clearTimeout(typeaheadTimer);
+  typeaheadTimer = window.setTimeout(() => (typeahead = ""), 600);
+  const lower = ch.toLowerCase();
+  const cycling = typeahead === "" || typeahead === lower.repeat(typeahead.length);
+  typeahead += lower;
+  const query = cycling ? lower : typeahead;
+  const n = voiceOrder.length;
+  const curIdx = voiceOrder.findIndex(
+    (o) => o.dataset.id === (activeVoice || selectedVoice)
+  );
+  const startOffset = cycling ? 1 : 0;
+  for (let i = 0; i < n; i++) {
+    const idx = (curIdx + startOffset + i + n) % n;
+    const name = voiceById.get(voiceOrder[idx].dataset.id).name.toLowerCase();
+    if (name.startsWith(query)) {
+      setActive(voiceOrder[idx].dataset.id, { scroll: true });
+      return;
+    }
+  }
+}
+
+function onTriggerKeydown(e) {
+  const k = e.key;
+  if (!pickerOpen) {
+    if (k === "ArrowDown" || k === "ArrowUp" || k === "Enter" || k === " " || k === "Spacebar") {
+      e.preventDefault();
+      openPicker();
+    } else if (k === "Home") {
+      e.preventDefault();
+      openPicker();
+      setActiveEdge("first");
+    } else if (k === "End") {
+      e.preventDefault();
+      openPicker();
+      setActiveEdge("last");
+    } else if (isTypeaheadKey(e)) {
+      openPicker();
+      typeaheadFind(k);
+    }
+    return;
+  }
+  switch (k) {
+    case "ArrowDown":
+      e.preventDefault();
+      moveActive(1);
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      moveActive(-1);
+      break;
+    case "Home":
+      e.preventDefault();
+      setActiveEdge("first");
+      break;
+    case "End":
+      e.preventDefault();
+      setActiveEdge("last");
+      break;
+    case "Enter":
+    case " ":
+    case "Spacebar":
+      e.preventDefault();
+      commitActive();
+      closePicker();
+      break;
+    case "Escape":
+      e.preventDefault();
+      closePicker();
+      break;
+    case "Tab":
+      commitActive();
+      closePicker({ focus: false });
+      break;
+    default:
+      if (isTypeaheadKey(e)) typeaheadFind(k);
+  }
+}
+
+function onListClick(e) {
+  const opt = e.target.closest(".vp-opt");
+  if (!opt) return;
+  setVoice(opt.dataset.id, { fromUser: true });
+  closePicker();
+}
+
+function onListPointerMove(e) {
+  const opt = e.target.closest(".vp-opt");
+  if (opt && opt.dataset.id !== activeVoice) setActive(opt.dataset.id);
+}
+
+function onDocPointerDown(e) {
+  if (pickerOpen && !el.voicePicker.contains(e.target)) {
+    closePicker({ focus: false });
+  }
 }
 
 function restorePrefs() {
   const prefs = loadPrefs();
-  el.voice.value = prefs.voice || DEFAULT_VOICE;
-  if (!el.voice.value) el.voice.value = DEFAULT_VOICE;
+  setVoice(prefs.voice || DEFAULT_VOICE);
   el.speed.value = String(prefs.speed ?? 1);
   updateSpeedLabel();
 }
 
 function persistPrefs() {
   savePrefs({
-    voice: el.voice.value,
+    voice: getVoice(),
     speed: Number(el.speed.value),
   });
 }
@@ -187,7 +429,7 @@ function startGeneration() {
     type: "generate",
     jobId: state.jobId,
     text,
-    voice: el.voice.value,
+    voice: getVoice(),
     speed: Number(el.speed.value),
   });
 }
@@ -698,10 +940,6 @@ el.speed.addEventListener("change", () => {
   persistPrefs();
   if (state.gen === "ready") invalidateToIdle();
 });
-el.voice.addEventListener("change", () => {
-  persistPrefs();
-  if (state.gen === "ready") invalidateToIdle();
-});
 
 /* ---------- utils ---------- */
 
@@ -714,7 +952,7 @@ function formatTime(seconds) {
 
 /* ---------- init ---------- */
 
-populateVoices();
+buildVoicePicker();
 restorePrefs();
 updateCharCount();
 sizeCanvas();
