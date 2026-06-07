@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JustSayIt — local text to speech</title>
+    <meta
+      name="description"
+      content="Turn pasted text into spoken audio, generated 100% locally in your browser. Nothing is uploaded."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314110d'/%3E%3Cg fill='%23ffb000'%3E%3Crect x='7' y='13' width='3.5' height='6' rx='1.5'/%3E%3Crect x='14.25' y='8' width='3.5' height='16' rx='1.75'/%3E%3Crect x='21.5' y='11' width='3.5' height='10' rx='1.75'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="console">
+      <header class="masthead">
+        <div class="brand">
+          <span class="rec-dot" aria-hidden="true"></span>
+          <h1>Just<span>Say</span>It</h1>
+          <p class="tagline">on&#8209;air text&#8209;to&#8209;speech · runs on your machine</p>
+        </div>
+        <div class="meters">
+          <span class="chip" id="backend-chip" title="Compute backend">
+            <span class="chip-key">ENGINE</span>
+            <span class="chip-val" id="backend-val">—</span>
+          </span>
+          <span class="chip private" title="No audio or text ever leaves your browser">
+            <span class="chip-key">PRIVACY</span>
+            <span class="chip-val">LOCAL</span>
+          </span>
+        </div>
+      </header>
+
+      <main class="deck">
+        <section class="script-bay">
+          <label class="bay-label" for="text">SCRIPT</label>
+          <textarea
+            id="text"
+            placeholder="Paste or type the words you want spoken aloud…"
+            spellcheck="true"
+            maxlength="8000"
+          ></textarea>
+          <div class="bay-foot">
+            <span id="char-count" class="char-count">0 / 8000</span>
+            <span class="hint">First run downloads the voice model, then it's cached.</span>
+          </div>
+        </section>
+
+        <section class="settings">
+          <div class="field">
+            <label for="voice">VOICE</label>
+            <div class="select-wrap">
+              <select id="voice"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="speed">RATE <span id="speed-val" class="mono-val">1.0×</span></label>
+            <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1" />
+          </div>
+          <div class="field">
+            <label for="format">SAVE AS</label>
+            <div class="select-wrap">
+              <select id="format">
+                <option value="wav">WAV · lossless</option>
+                <option value="mp3">MP3 · 128 kbps</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="transport">
+          <button id="generate" class="transport-btn" type="button">
+            <span class="reel" aria-hidden="true"></span>
+            <span class="btn-label" id="generate-label">Generate</span>
+          </button>
+          <button id="cancel" class="ghost-btn hidden" type="button">Cancel</button>
+          <button id="save" class="save-btn" type="button" disabled>
+            <span class="save-glyph" aria-hidden="true">▼</span>
+            <span id="save-label">Save</span>
+          </button>
+        </section>
+
+        <section class="gen-progress" id="gen-progress" aria-live="polite">
+          <div class="progress-head">
+            <span id="gen-status">Idle</span>
+            <span id="gen-percent" class="mono-val"></span>
+          </div>
+          <div class="bar" role="progressbar" aria-label="Generation progress">
+            <div class="bar-fill" id="gen-fill"></div>
+            <div class="bar-leds" aria-hidden="true"></div>
+          </div>
+        </section>
+
+        <section class="player" id="player">
+          <canvas id="waveform" class="waveform" width="1200" height="200"></canvas>
+          <div class="player-foot">
+            <span id="time-current" class="mono-val">0:00</span>
+            <span id="player-msg" class="player-msg">No audio yet</span>
+            <span id="time-total" class="mono-val">0:00</span>
+          </div>
+        </section>
+
+        <p class="status-line" id="status" role="status" aria-live="polite"></p>
+      </main>
+
+      <footer class="colophon">
+        <span>Kokoro&#8209;82M via Transformers.js</span>
+        <span class="dot">·</span>
+        <span>WebGPU / WASM</span>
+        <span class="dot">·</span>
+        <span>open the network tab — nothing's uploaded</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

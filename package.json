@@ -1,0 +1,19 @@
+{
+  "name": "justsayit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "100% in-browser text-to-speech using Kokoro (kokoro-js + Transformers.js).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "kokoro-js": "1.2.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  }
+}

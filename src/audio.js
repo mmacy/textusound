@@ -1,0 +1,116 @@
+import lamejs from "@breezystack/lamejs";
+
+export function concatFloat32(parts) {
+  let len = 0;
+  for (const p of parts) len += p.length;
+  const out = new Float32Array(len);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+export function silence(seconds, sampleRate) {
+  return new Float32Array(Math.max(0, Math.round(seconds * sampleRate)));
+}
+
+export function computePeaks(samples, buckets) {
+  const out = new Float32Array(buckets);
+  if (samples.length === 0) return out;
+  const size = samples.length / buckets;
+  for (let i = 0; i < buckets; i++) {
+    const start = Math.floor(i * size);
+    const end = Math.min(samples.length, Math.floor((i + 1) * size));
+    let max = 0;
+    for (let j = start; j < end; j++) {
+      const a = Math.abs(samples[j]);
+      if (a > max) max = a;
+    }
+    out[i] = max;
+  }
+  return out;
+}
+
+// Deterministic sentence/word chunking so generation progress is exact.
+export function splitText(text) {
+  const clean = (text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const rough =
+    clean.match(/[^.!?…]+[.!?…]+["')\]]*(?:\s|$)|[^.!?…]+$/g) || [clean];
+  const MAX = 300;
+  const out = [];
+  for (const segment of rough) {
+    let t = segment.trim();
+    while (t.length > MAX) {
+      let cut = t.lastIndexOf(" ", MAX);
+      if (cut <= 0) cut = MAX;
+      const head = t.slice(0, cut).trim();
+      if (head) out.push(head);
+      t = t.slice(cut).trim();
+    }
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+function clampSample(s) {
+  if (s > 1) s = 1;
+  else if (s < -1) s = -1;
+  return s < 0 ? s * 0x8000 : s * 0x7fff;
+}
+
+export function floatToWav(samples, sampleRate) {
+  const numFrames = samples.length;
+  const buffer = new ArrayBuffer(44 + numFrames * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++)
+      view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + numFrames * 2, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, "data");
+  view.setUint32(40, numFrames * 2, true);
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    view.setInt16(offset, clampSample(samples[i]), true);
+    offset += 2;
+  }
+  return buffer;
+}
+
+export function encodeMp3(samples, sampleRate, kbps = 128) {
+  const encoder = new lamejs.Mp3Encoder(1, sampleRate, kbps);
+  const int16 = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) int16[i] = clampSample(samples[i]);
+
+  const blockSize = 1152;
+  const chunks = [];
+  for (let i = 0; i < int16.length; i += blockSize) {
+    const buf = encoder.encodeBuffer(int16.subarray(i, i + blockSize));
+    if (buf.length > 0) chunks.push(new Uint8Array(buf));
+  }
+  const end = encoder.flush();
+  if (end.length > 0) chunks.push(new Uint8Array(end));
+
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    result.set(c, offset);
+    offset += c.length;
+  }
+  return result;
+}
