@@ -1,11 +1,11 @@
 import { KokoroTTS } from "kokoro-js";
 import {
-  splitText,
   concatFloat32,
   silence,
   computePeaks,
   floatToWav,
 } from "./audio.js";
+import { chunkText } from "./chunk.js";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const SAMPLE_RATE = 24000;
@@ -132,7 +132,7 @@ async function handleGenerate(jobId, text, voice, speed) {
     return;
   }
 
-  const chunks = splitText(text);
+  const chunks = chunkText(text);
   if (chunks.length === 0) {
     post({ type: "error", jobId, message: "There is no text to speak." });
     return;
