@@ -1,5 +1,3 @@
-import lamejs from "@breezystack/lamejs";
-
 export function concatFloat32(parts) {
   let len = 0;
   for (const p of parts) len += p.length;
@@ -109,29 +107,4 @@ export function floatToWav(samples, sampleRate) {
     offset += 2;
   }
   return buffer;
-}
-
-export function encodeMp3(samples, sampleRate, kbps = 128) {
-  const encoder = new lamejs.Mp3Encoder(1, sampleRate, kbps);
-  const int16 = new Int16Array(samples.length);
-  for (let i = 0; i < samples.length; i++) int16[i] = clampSample(samples[i]);
-
-  const blockSize = 1152;
-  const chunks = [];
-  for (let i = 0; i < int16.length; i += blockSize) {
-    const buf = encoder.encodeBuffer(int16.subarray(i, i + blockSize));
-    if (buf.length > 0) chunks.push(new Uint8Array(buf));
-  }
-  const end = encoder.flush();
-  if (end.length > 0) chunks.push(new Uint8Array(end));
-
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    result.set(c, offset);
-    offset += c.length;
-  }
-  return result;
 }

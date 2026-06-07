@@ -20,7 +20,6 @@ const el = {
   voice: $("voice"),
   speed: $("speed"),
   speedVal: $("speed-val"),
-  format: $("format"),
   generate: $("generate"),
   generateLabel: $("generate-label"),
   cancel: $("cancel"),
@@ -48,9 +47,6 @@ const state = {
   peaks: null,
   duration: 0,
   audioUrl: null,
-  pendingEncode: null, // { jobId, resolve, reject }
-  mp3: null, // { jobId, bytes } cached MP3 for the current audio
-  mp3Promise: null, // { jobId, promise } in-flight MP3 encode
 };
 
 const audio = new Audio();
@@ -79,7 +75,6 @@ function restorePrefs() {
   el.voice.value = prefs.voice || DEFAULT_VOICE;
   if (!el.voice.value) el.voice.value = DEFAULT_VOICE;
   el.speed.value = String(prefs.speed ?? 1);
-  el.format.value = prefs.format === "mp3" ? "mp3" : "wav";
   updateSpeedLabel();
 }
 
@@ -87,7 +82,6 @@ function persistPrefs() {
   savePrefs({
     voice: el.voice.value,
     speed: Number(el.speed.value),
-    format: el.format.value,
   });
 }
 
@@ -146,25 +140,10 @@ function clearGenProgress() {
   el.bar.setAttribute("aria-valuenow", "0");
 }
 
-function rejectPendingEncode() {
-  if (state.pendingEncode) {
-    state.pendingEncode.reject(
-      new DOMException("Audio was invalidated.", "AbortError"),
-    );
-    state.pendingEncode = null;
-  }
-  state.mp3 = null;
-  state.mp3Promise = null;
-}
-
 // Single source of truth for discarding generated audio: bumps the job id so
-// any in-flight worker result is ignored, rejects a pending MP3 encode so the
-// Save flow can't hang, tells the worker to drop its retained PCM, and returns
-// the UI to the idle state.
+// any in-flight worker result is ignored and returns the UI to the idle state.
 function invalidateToIdle() {
   state.jobId += 1;
-  rejectPendingEncode();
-  worker.postMessage({ type: "clear" });
   resetAudio();
   state.gen = "idle";
   el.genProgress.classList.remove("active");
@@ -203,9 +182,7 @@ function startGeneration() {
 function cancelGeneration() {
   if (state.gen !== "busy") return;
   worker.postMessage({ type: "cancel" });
-  worker.postMessage({ type: "clear" });
   state.jobId += 1; // any in-flight result for the old id is now stale
-  rejectPendingEncode();
   state.gen = "idle";
   el.genProgress.classList.remove("active");
   el.genStatus.textContent = "Cancelled";
@@ -267,7 +244,6 @@ worker.onmessage = (event) => {
       break;
     }
     case "error": {
-      rejectPendingEncode();
       state.gen = "idle";
       el.genProgress.classList.remove("active");
       el.genStatus.textContent = "Error";
@@ -276,28 +252,11 @@ worker.onmessage = (event) => {
       refreshTransport();
       break;
     }
-    case "encoded": {
-      if (state.pendingEncode && state.pendingEncode.jobId === msg.jobId) {
-        state.pendingEncode.resolve(msg.mp3);
-        state.pendingEncode = null;
-      }
-      break;
-    }
-    case "encodeError": {
-      if (state.pendingEncode && state.pendingEncode.jobId === msg.jobId) {
-        state.pendingEncode.reject(
-          new Error(msg.message || "MP3 encoding failed."),
-        );
-        state.pendingEncode = null;
-      }
-      break;
-    }
   }
 };
 
 worker.onerror = (e) => {
   setStatus(`Worker error: ${e.message || e}`, "error");
-  rejectPendingEncode();
   if (state.gen === "busy") {
     state.gen = "idle";
     el.genProgress.classList.remove("active");
@@ -335,7 +294,6 @@ function onAudioReady(msg) {
   drawWaveform(0);
   refreshTransport();
   setStatus("");
-  if (el.format.value === "mp3") prefetchMp3();
 }
 
 function togglePlay() {
@@ -539,50 +497,6 @@ function suggestedBaseName() {
   return slug || "textusound";
 }
 
-function requestEncode(jobId) {
-  return new Promise((resolve, reject) => {
-    state.pendingEncode = { jobId, resolve, reject };
-    worker.postMessage({ type: "encode", jobId });
-  });
-}
-
-// Encode MP3 at most once per generation, reusing an in-flight or cached
-// result. Pre-fetching when audio is ready means the bytes are usually present
-// before the user clicks Save, so the FS picker isn't followed by a long await.
-function ensureMp3(jobId) {
-  if (state.mp3 && state.mp3.jobId === jobId) {
-    return Promise.resolve(state.mp3.bytes);
-  }
-  if (state.mp3Promise && state.mp3Promise.jobId === jobId) {
-    return state.mp3Promise.promise;
-  }
-  const promise = requestEncode(jobId).then((bytes) => {
-    if (state.jobId === jobId) state.mp3 = { jobId, bytes };
-    if (state.mp3Promise && state.mp3Promise.jobId === jobId) {
-      state.mp3Promise = null;
-    }
-    return bytes;
-  });
-  state.mp3Promise = { jobId, promise };
-  return promise;
-}
-
-function prefetchMp3() {
-  if (state.gen !== "ready") return;
-  ensureMp3(state.jobId).catch(() => {
-    /* a failed/aborted prefetch is retried on demand at save time */
-  });
-}
-
-async function prepareBlob(format, jobAtSave, mime) {
-  if (format === "mp3") {
-    el.saveLabel.textContent = "Encoding…";
-    const mp3 = await ensureMp3(jobAtSave);
-    return new Blob([mp3], { type: mime });
-  }
-  return new Blob([state.wavBuffer], { type: mime });
-}
-
 function finishSave() {
   el.saveLabel.textContent = "Save";
   el.save.disabled = state.gen !== "ready";
@@ -590,18 +504,17 @@ function finishSave() {
 
 async function onSave() {
   if (state.gen !== "ready" || !state.wavBuffer) return;
-  const format = el.format.value;
-  const ext = format === "mp3" ? "mp3" : "wav";
-  const mime = format === "mp3" ? "audio/mpeg" : "audio/wav";
-  const filename = `${suggestedBaseName()}.${ext}`;
-  const jobAtSave = state.jobId;
+  const filename = `${suggestedBaseName()}.wav`;
+  // WAV bytes are already in hand, so the blob is built synchronously — this
+  // keeps the save picker within the click's user activation and means there's
+  // never a half-written file.
+  const blob = new Blob([state.wavBuffer], { type: "audio/wav" });
 
-  // Path A: File System Access API. The picker MUST run before any await so the
-  // click's transient user activation is still valid; only then do we encode.
+  // Path A: File System Access API (remembers the directory).
   if (supportsFsAccess()) {
     let handle;
     try {
-      handle = await pickSaveFile(filename, mime, ext);
+      handle = await pickSaveFile(filename, "audio/wav", "wav");
     } catch (e) {
       if (e && e.name === "AbortError") {
         setStatus("Save cancelled.", "");
@@ -611,21 +524,6 @@ async function onSave() {
     }
     if (handle) {
       el.save.disabled = true;
-      let blob;
-      try {
-        blob = await prepareBlob(format, jobAtSave, mime);
-      } catch (e) {
-        finishSave();
-        if (e && e.name === "AbortError") {
-          setStatus(
-            "Save cancelled — the text changed before saving. You can delete the empty file your browser created.",
-            "",
-          );
-        } else {
-          setStatus(`Save failed: ${(e && e.message) || e}`, "error");
-        }
-        return;
-      }
       el.saveLabel.textContent = "Saving…";
       try {
         await writeToHandle(handle, blob);
@@ -649,21 +547,8 @@ async function onSave() {
   }
 
   // Path B: download fallback (no FS Access API, or the picker was unavailable).
-  el.save.disabled = true;
-  try {
-    const blob = await prepareBlob(format, jobAtSave, mime);
-    el.saveLabel.textContent = "Saving…";
-    downloadBlob(blob, filename);
-    setStatus(`Downloaded “${filename}”.`, "ok");
-  } catch (e) {
-    if (e && e.name === "AbortError") {
-      setStatus("Save cancelled — the text changed before saving.", "");
-    } else {
-      setStatus(`Save failed: ${(e && e.message) || e}`, "error");
-    }
-  } finally {
-    finishSave();
-  }
+  downloadBlob(blob, filename);
+  setStatus(`Downloaded “${filename}”.`, "ok");
 }
 el.save.addEventListener("click", onSave);
 
@@ -686,10 +571,6 @@ el.speed.addEventListener("change", () => {
 el.voice.addEventListener("change", () => {
   persistPrefs();
   if (state.gen === "ready") invalidateToIdle();
-});
-el.format.addEventListener("change", () => {
-  persistPrefs();
-  if (el.format.value === "mp3") prefetchMp3();
 });
 
 /* ---------- utils ---------- */

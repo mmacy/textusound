@@ -11,11 +11,13 @@ and [Transformers.js](https://huggingface.co/docs/transformers.js).
 ## Features
 
 - **Paste text → speech.** A single transport control: **Generate** → **Generating…** → **Play**.
-- **Save locally** as **WAV** (lossless) or **MP3** (128 kbps), encoded in‑browser.
+- **Save locally** as a **WAV** file (Kokoro's native 24 kHz output).
 - **Remembers your save location.** On supported browsers the file picker reopens in
   your most‑recently‑used directory, both within a session and on future visits.
 - **Progress for both phases** — a bar for generation, and a live waveform seek bar for playback.
 - **28 voices** (American/British, male/female) and an adjustable speaking rate.
+- **Keyboard- and screen‑reader‑friendly** — the player is a focusable slider
+  (arrow keys, Home/End, Page Up/Down to seek; Space/Enter to play/pause).
 - **Private by design.** Your text and the generated audio are never sent
   anywhere. The only outbound requests are the one‑time model and font downloads
   from public CDNs; a Content‑Security‑Policy restricts where the page may connect.
@@ -62,9 +64,31 @@ project subpath (`https://<user>.github.io/justsayit/`) or a domain root.
 
 - The first generation downloads the model (tens to a few hundred MB depending on
   the selected backend). This is a one‑time cost; the browser caches it afterward.
-- Audio is 24 kHz mono. MP3 is encoded on demand when you save.
+- Audio is 24 kHz mono WAV.
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for the architecture, the worker message protocol, the
+conventions to follow, and the gotchas to watch for (CSP, save‑picker user
+activation, job‑id invalidation).
 
 ## License
 
-The application code in this repository is provided as‑is. The Kokoro model and the
-kokoro-js / Transformers.js libraries are distributed under their own licenses.
+The application code in this repository is dedicated to the public domain under
+[CC0 1.0 Universal](LICENSE) — you may copy, modify, and distribute it, even
+commercially, without asking permission.
+
+Third‑party components keep their own licenses and are not covered by the CC0
+dedication:
+
+- [Kokoro‑82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) model — Apache‑2.0
+- [kokoro-js](https://github.com/hexgrad/kokoro) and
+  [Transformers.js](https://github.com/huggingface/transformers.js) — Apache‑2.0
+- Fonts “Big Shoulders Display” and “IBM Plex Mono” — SIL Open Font License 1.1
+
+---
+
+<p align="center">
+  <img src="docs/vcn-software-logo.png" alt="VCN Software" width="400">
+</p>
+

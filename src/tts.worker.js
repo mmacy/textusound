@@ -5,7 +5,6 @@ import {
   silence,
   computePeaks,
   floatToWav,
-  encodeMp3,
 } from "./audio.js";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
@@ -19,8 +18,6 @@ const state = {
   loadPromise: null,
   cancelRequested: false,
   currentJobId: 0,
-  lastPcm: null,
-  lastJobId: null,
   genChain: Promise.resolve(), // serializes generation so generate() never overlaps
 };
 
@@ -171,9 +168,6 @@ async function handleGenerate(jobId, text, voice, speed) {
   }
 
   const pcm = concatFloat32(parts);
-  state.lastPcm = pcm;
-  state.lastJobId = jobId;
-
   const wav = floatToWav(pcm, SAMPLE_RATE);
   const peaks = computePeaks(pcm, WAVEFORM_BUCKETS);
 
@@ -189,28 +183,6 @@ async function handleGenerate(jobId, text, voice, speed) {
     },
     [wav, peaks.buffer],
   );
-}
-
-function handleEncode(jobId) {
-  if (!state.lastPcm || state.lastJobId !== jobId) {
-    post({
-      type: "encodeError",
-      jobId,
-      message: "No audio is available to encode.",
-    });
-    return;
-  }
-  try {
-    const mp3 = encodeMp3(state.lastPcm, SAMPLE_RATE, 128);
-    const buffer = mp3.buffer;
-    post({ type: "encoded", jobId, mp3: buffer }, [buffer]);
-  } catch (e) {
-    post({
-      type: "encodeError",
-      jobId,
-      message: "MP3 encoding failed. " + ((e && e.message) || e),
-    });
-  }
 }
 
 self.onmessage = (event) => {
@@ -235,13 +207,6 @@ self.onmessage = (event) => {
       break;
     case "cancel":
       state.cancelRequested = true;
-      break;
-    case "encode":
-      handleEncode(msg.jobId);
-      break;
-    case "clear":
-      state.lastPcm = null;
-      state.lastJobId = null;
       break;
     default:
       break;
