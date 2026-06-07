@@ -58,7 +58,7 @@ One‑time setup: in the repository's **Settings → Pages**, set **Source** to
 **GitHub Actions**.
 
 The build uses a relative base path, so the app works whether it's served from a
-project subpath (`https://<user>.github.io/justsayit/`) or a domain root.
+project subpath (`https://<user>.github.io/textusound/`) or a domain root.
 
 ## Notes
 

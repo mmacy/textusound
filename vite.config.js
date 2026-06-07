@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 // Relative base so the app works both at a domain root and under a
-// GitHub Pages project subpath (e.g. https://USER.github.io/justsayit/).
+// GitHub Pages project subpath (e.g. https://USER.github.io/textusound/).
 export default defineConfig({
   base: "./",
   build: {
