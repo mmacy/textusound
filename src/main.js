@@ -8,6 +8,7 @@ import {
   downloadBlob,
 } from "./save.js";
 import { loadPrefs, savePrefs } from "./storage.js";
+import { tidyReport } from "./audio.js";
 
 const worker = new Worker(new URL("./tts.worker.js", import.meta.url), {
   type: "module",
@@ -36,6 +37,10 @@ const el = {
   playerMsg: $("player-msg"),
   status: $("status"),
   backendVal: $("backend-val"),
+  tidy: $("tidy"),
+  notice: $("tidy-notice"),
+  noticeMsg: $("tidy-notice-msg"),
+  undo: $("tidy-undo"),
 };
 
 const MAX_CHARS = 8000;
@@ -93,7 +98,15 @@ function updateCharCount() {
   const n = el.text.value.length;
   el.charCount.textContent = `${n.toLocaleString()} / ${MAX_CHARS.toLocaleString()}`;
   el.charCount.classList.toggle("over", n > MAX_CHARS);
+  refreshTidyLamp();
   refreshTransport();
+}
+
+// Light the TIDY lamp only when the current script actually has something to
+// clean up, so it reads as a gentle, honest nudge rather than ever-present
+// chrome.
+function refreshTidyLamp() {
+  el.tidy.disabled = !tidyReport(el.text.value).changed;
 }
 
 /* ---------- transport / state machine ---------- */
@@ -560,8 +573,125 @@ el.text.addEventListener("input", () => {
   } else if (state.gen === "busy") {
     cancelGeneration();
   }
+  // A genuine edit supersedes any standing undo offer.
+  hideTidyNotice();
   updateCharCount();
 });
+
+/* ---------- tidy (clean pasted / messy text) ---------- */
+
+// Auto-tidy pasted text (e.g. from PDFs) so soft line wraps and hyphenated word
+// breaks don't muddy the speech. Only intervene when tidying changes something,
+// so an ordinary paste keeps the browser's native undo behavior.
+el.text.addEventListener("paste", (e) => {
+  const data = e.clipboardData || window.clipboardData;
+  if (!data) return;
+  const raw = data.getData("text/plain");
+  if (!raw) return;
+  // Don't trim the fragment's edges — a leading/trailing space may be the only
+  // thing separating it from text already in the field.
+  const report = tidyReport(raw, { trimEdges: false });
+  if (!report.changed) return;
+  e.preventDefault();
+
+  // Remember what the field WOULD be with the raw paste, so Undo can restore it.
+  const start = el.text.selectionStart ?? el.text.value.length;
+  const end = el.text.selectionEnd ?? el.text.value.length;
+  const rawFull = el.text.value.slice(0, start) + raw + el.text.value.slice(end);
+
+  insertIntoTextarea(el.text, report.text); // fires input → resets state + lamp
+  flashTextarea();
+  showTidyNotice(report, rawFull);
+});
+
+// The manual lamp: tidy whatever is already in the box (typed, drag-dropped, or
+// pasted before the user noticed the auto behavior).
+el.tidy.addEventListener("click", () => {
+  const before = el.text.value;
+  const report = tidyReport(before);
+  if (!report.changed) return;
+  el.text.value = report.text;
+  el.text.selectionStart = el.text.selectionEnd = report.text.length;
+  el.text.dispatchEvent(new Event("input", { bubbles: true })); // resets state + lamp
+  flashTextarea();
+  showTidyNotice(report, before);
+  el.text.focus();
+});
+
+el.undo.addEventListener("click", () => {
+  if (!pendingUndo) return;
+  // Bail if the script changed since we offered the undo — never clobber edits.
+  if (el.text.value !== pendingUndo.expect) {
+    hideTidyNotice();
+    return;
+  }
+  const restore = pendingUndo.revertTo;
+  hideTidyNotice();
+  el.text.value = restore;
+  el.text.selectionStart = el.text.selectionEnd = restore.length;
+  el.text.dispatchEvent(new Event("input", { bubbles: true }));
+  el.text.focus();
+});
+
+let pendingUndo = null;
+let noticeTimer = null;
+
+function describeTidy(report) {
+  const parts = [];
+  if (report.joinedWraps > 0) {
+    const w = report.joinedWraps;
+    parts.push(`joined <b>${w}</b> wrapped ${w === 1 ? "line" : "lines"}`);
+  }
+  if (report.mendedSplits > 0) {
+    const s = report.mendedSplits;
+    parts.push(`mended <b>${s}</b> split ${s === 1 ? "word" : "words"}`);
+  }
+  return parts.length ? `Tidied — ${parts.join(" · ")}.` : "Tidied spacing.";
+}
+
+function showTidyNotice(report, revertTo) {
+  pendingUndo = { revertTo, expect: el.text.value };
+  el.noticeMsg.innerHTML = describeTidy(report);
+  el.notice.hidden = false;
+  // Replay the slide-in even on a rapid second tidy.
+  el.notice.style.animation = "none";
+  void el.notice.offsetWidth;
+  el.notice.style.animation = "";
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(hideTidyNotice, 9000);
+}
+
+function hideTidyNotice() {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
+  el.notice.hidden = true;
+  pendingUndo = null;
+}
+
+function flashTextarea() {
+  el.text.classList.remove("flash-tidy");
+  void el.text.offsetWidth; // restart the animation
+  el.text.classList.add("flash-tidy");
+}
+
+function insertIntoTextarea(textarea, text) {
+  textarea.focus();
+  // execCommand keeps the native undo stack intact where supported.
+  let inserted = false;
+  try {
+    inserted = document.execCommand("insertText", false, text);
+  } catch {
+    inserted = false;
+  }
+  if (!inserted) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    textarea.setRangeText(text, start, end, "end");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
 
 el.speed.addEventListener("input", updateSpeedLabel);
 el.speed.addEventListener("change", () => {

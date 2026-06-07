@@ -57,6 +57,21 @@
           <div class="bay-foot">
             <span id="char-count" class="char-count">0 / 8000</span>
             <span class="hint">First run downloads the voice model, then it's cached.</span>
+            <button
+              id="tidy"
+              class="tidy-btn"
+              type="button"
+              disabled
+              title="Tidy the script: join wrapped lines, mend words split across lines, and drop stray spacing. Pasted text is tidied automatically."
+            >
+              <span class="tidy-glyph" aria-hidden="true">&#10022;</span>
+              <span id="tidy-label">Tidy</span>
+            </button>
+          </div>
+          <div id="tidy-notice" class="tidy-notice" hidden aria-live="polite">
+            <span class="tidy-notice-dot" aria-hidden="true"></span>
+            <span id="tidy-notice-msg" class="tidy-notice-msg"></span>
+            <button id="tidy-undo" class="tidy-undo" type="button">Undo</button>
           </div>
         </section>
 

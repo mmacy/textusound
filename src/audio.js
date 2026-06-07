@@ -31,6 +31,51 @@ export function computePeaks(samples, buckets) {
   return out;
 }
 
+// Make text pasted from PDFs and the like TTS-ready. PDF copies wrap lines
+// mid-paragraph (causing odd pacing) and hyphenate words across line breaks
+// (e.g. "manipu-\nlate"), which the speech model mispronounces. This joins soft
+// line wraps into spaces, stitches hyphenated words back together, normalizes
+// exotic whitespace, and keeps real paragraph breaks (blank lines) intact.
+//
+// Returns the cleaned text plus a small report so the UI can tell the user
+// exactly what was changed (and offer an undo). `trimEdges` trims leading and
+// trailing whitespace of the whole string; disable it when cleaning a fragment
+// that's being inserted into existing text, so a separating space isn't eaten.
+export function tidyReport(text, { trimEdges = true } = {}) {
+  const original = text == null ? "" : String(text);
+  let t = original.replace(/\r\n?/g, "\n");
+  t = t.replace(/[\u200B-\u200D\uFEFF]/g, ""); // zero-width chars
+  t = t.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " "); // exotic spaces
+
+  // Reunite a word hyphenated across a line break ("manipu-\nlate").
+  const splitRe = /([A-Za-z])-[ \t]*\n[ \t]*(?=[a-z])/g;
+  const mendedSplits = (t.match(splitRe) || []).length;
+  t = t.replace(splitRe, "$1");
+
+  t = t.replace(/[ \t]+/g, " "); // collapse runs of spaces/tabs
+  t = t.replace(/ *\n */g, "\n"); // trim spaces around line breaks
+
+  // A lone line break is a soft wrap; a blank line is a real paragraph break.
+  // Count the soft wraps (newlines living inside a paragraph) before flattening.
+  const joinedWraps = t
+    .split(/\n{2,}/)
+    .reduce((n, para) => n + (para.match(/\n/g) || []).length, 0);
+
+  // Stash paragraph breaks, flatten soft wraps to spaces, then restore.
+  t = t
+    .replace(/\n{2,}/g, "\u0000")
+    .replace(/\n/g, " ")
+    .replace(/\u0000/g, "\n\n");
+  t = t.replace(/ {2,}/g, " ");
+  if (trimEdges) t = t.trim();
+
+  return { text: t, changed: t !== original, joinedWraps, mendedSplits };
+}
+
+export function tidyText(text) {
+  return tidyReport(text).text;
+}
+
 // Deterministic sentence/word chunking so generation progress is exact.
 // Uses Intl.Segmenter (keeps decimals like "3.14" and many abbreviations
 // intact) with a regex fallback, then hard-caps very long runs on word

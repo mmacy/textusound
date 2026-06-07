@@ -28,9 +28,9 @@ served build, not just source.
 | Path | Responsibility |
 | --- | --- |
 | `index.html` | Markup, fonts, favicon, and the **Content-Security-Policy** meta. |
-| `src/main.js` | UI orchestration: state machine, worker wiring, waveform rendering, playback, and the save flow. |
+| `src/main.js` | UI orchestration: state machine, worker wiring, waveform rendering, playback, paste/manual text tidying, and the save flow. |
 | `src/tts.worker.js` | All inference. Loads the model, chunks text, generates per chunk, builds the WAV. |
-| `src/audio.js` | Pure helpers: `splitText`, `concatFloat32`, `silence`, `computePeaks`, `floatToWav`. Imported by the worker. |
+| `src/audio.js` | Pure helpers: `tidyText`/`tidyReport` (clean pasted text), `splitText`, `concatFloat32`, `silence`, `computePeaks`, `floatToWav`. Imported by the worker and `main.js`. |
 | `src/save.js` | File System Access API save + MRU directory persistence, with a download fallback. |
 | `src/storage.js` | IndexedDB (handle persistence) and `localStorage` (prefs). |
 | `src/voices.js` | The 28-voice list used to build the picker. |
