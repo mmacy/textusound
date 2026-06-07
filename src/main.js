@@ -443,8 +443,8 @@ function drawWaveform(progress) {
   ctx.clearRect(0, 0, cssW, cssH);
 
   const styles = getComputedStyle(document.documentElement);
-  const dim = styles.getPropertyValue("--wave-dim").trim() || "#5a4a32";
-  const hot = styles.getPropertyValue("--amber").trim() || "#ffb000";
+  const dim = styles.getPropertyValue("--wave-dim").trim() || "#5b3a6a";
+  const hot = styles.getPropertyValue("--signal").trim() || "#a8db44";
 
   const mid = cssH / 2;
   const gap = 1;
@@ -536,7 +536,7 @@ function suggestedBaseName() {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  return slug || "justsayit";
+  return slug || "textusound";
 }
 
 function requestEncode(jobId) {

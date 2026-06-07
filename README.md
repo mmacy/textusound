@@ -1,9 +1,9 @@
-# JustSayIt
+# Textusound
 
 Turn pasted text into spoken audio, generated **locally in your browser**. Your
 text and the generated audio never leave your machine — the only network
 requests are one‑time downloads of the speech model (from Hugging Face / its CDN)
-and the web fonts (from Google Fonts). JustSayIt runs the
+and the web fonts (from Google Fonts). Textusound runs the
 [Kokoro‑82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) speech
 model on your own machine via [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js)
 and [Transformers.js](https://huggingface.co/docs/transformers.js).

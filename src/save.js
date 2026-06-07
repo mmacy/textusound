@@ -1,7 +1,7 @@
 import { idbGet, idbSet, idbDelete } from "./storage.js";
 
 const HANDLE_KEY = "lastSaveHandle";
-const PICKER_ID = "justsayit-save";
+const PICKER_ID = "textusound-save";
 
 // The most-recently-used directory handle, kept in memory so the save picker
 // can be opened synchronously from a click (without awaiting IndexedDB, which

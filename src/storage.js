@@ -1,4 +1,4 @@
-const DB_NAME = "justsayit";
+const DB_NAME = "textusound";
 const STORE = "kv";
 const DB_VERSION = 1;
 
@@ -56,7 +56,7 @@ export async function idbDelete(key) {
   }
 }
 
-const PREFS_KEY = "justsayit:prefs";
+const PREFS_KEY = "textusound:prefs";
 
 export function loadPrefs() {
   try {
