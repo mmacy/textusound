@@ -21,6 +21,7 @@ const state = {
   currentJobId: 0,
   lastPcm: null,
   lastJobId: null,
+  genChain: Promise.resolve(), // serializes generation so generate() never overlaps
 };
 
 function post(msg, transfer) {
@@ -113,8 +114,11 @@ async function ensureLoaded() {
 }
 
 async function handleGenerate(jobId, text, voice, speed) {
-  state.currentJobId = jobId;
-  state.cancelRequested = false;
+  // Superseded before we even started (newer job arrived while queued).
+  if (jobId !== state.currentJobId) {
+    post({ type: "cancelled", jobId });
+    return;
+  }
 
   try {
     await ensureLoaded();
@@ -190,7 +194,7 @@ async function handleGenerate(jobId, text, voice, speed) {
 function handleEncode(jobId) {
   if (!state.lastPcm || state.lastJobId !== jobId) {
     post({
-      type: "error",
+      type: "encodeError",
       jobId,
       message: "No audio is available to encode.",
     });
@@ -202,7 +206,7 @@ function handleEncode(jobId) {
     post({ type: "encoded", jobId, mp3: buffer }, [buffer]);
   } catch (e) {
     post({
-      type: "error",
+      type: "encodeError",
       jobId,
       message: "MP3 encoding failed. " + ((e && e.message) || e),
     });
@@ -213,13 +217,24 @@ self.onmessage = (event) => {
   const msg = event.data || {};
   switch (msg.type) {
     case "generate":
-      handleGenerate(msg.jobId, msg.text, msg.voice, msg.speed);
+      // Mark this as the active job synchronously so any in-flight generation
+      // bails at its next chunk boundary, then queue this one so generate()
+      // calls never overlap on the shared model instance.
+      state.currentJobId = msg.jobId;
+      state.cancelRequested = false;
+      state.genChain = state.genChain.then(() =>
+        handleGenerate(msg.jobId, msg.text, msg.voice, msg.speed),
+      );
       break;
     case "cancel":
       state.cancelRequested = true;
       break;
     case "encode":
       handleEncode(msg.jobId);
+      break;
+    case "clear":
+      state.lastPcm = null;
+      state.lastJobId = null;
       break;
     default:
       break;

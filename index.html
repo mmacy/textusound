@@ -2,11 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; child-src 'self' blob:; media-src 'self' blob:; connect-src 'self' blob: data: https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JustSayIt — local text to speech</title>
     <meta
       name="description"
-      content="Turn pasted text into spoken audio, generated 100% locally in your browser. Nothing is uploaded."
+      content="Turn pasted text into spoken audio, generated locally in your browser. Your text and the audio never leave your machine; only the speech model and fonts are downloaded once from public CDNs."
     />
     <link
       rel="icon"
@@ -34,7 +38,7 @@
             <span class="chip-key">ENGINE</span>
             <span class="chip-val" id="backend-val">—</span>
           </span>
-          <span class="chip private" title="No audio or text ever leaves your browser">
+          <span class="chip private" title="Your text and the generated audio never leave your browser">
             <span class="chip-key">PRIVACY</span>
             <span class="chip-val">LOCAL</span>
           </span>
@@ -95,14 +99,34 @@
             <span id="gen-status">Idle</span>
             <span id="gen-percent" class="mono-val"></span>
           </div>
-          <div class="bar" role="progressbar" aria-label="Generation progress">
+          <div
+            class="bar"
+            id="gen-bar"
+            role="progressbar"
+            aria-label="Generation progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
             <div class="bar-fill" id="gen-fill"></div>
             <div class="bar-leds" aria-hidden="true"></div>
           </div>
         </section>
 
         <section class="player" id="player">
-          <canvas id="waveform" class="waveform" width="1200" height="200"></canvas>
+          <canvas
+            id="waveform"
+            class="waveform"
+            width="1200"
+            height="200"
+            role="slider"
+            tabindex="0"
+            aria-label="Playback position. Use arrow keys to seek."
+            aria-valuemin="0"
+            aria-valuemax="0"
+            aria-valuenow="0"
+            aria-valuetext="No audio"
+          ></canvas>
           <div class="player-foot">
             <span id="time-current" class="mono-val">0:00</span>
             <span id="player-msg" class="player-msg">No audio yet</span>
@@ -118,7 +142,7 @@
         <span class="dot">·</span>
         <span>WebGPU / WASM</span>
         <span class="dot">·</span>
-        <span>open the network tab — nothing's uploaded</span>
+        <span>your text &amp; audio stay in the browser; model &amp; fonts load once from CDNs</span>
       </footer>
     </div>
 

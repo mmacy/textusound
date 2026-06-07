@@ -581,6 +581,10 @@ input[type="range"]::-moz-range-thumb {
   cursor: default;
   opacity: 0.5;
 }
+.waveform:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
 .player-foot {
   display: flex;
   justify-content: space-between;

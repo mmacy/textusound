@@ -1,6 +1,12 @@
 import "./styles.css";
 import { VOICE_GROUPS, DEFAULT_VOICE } from "./voices.js";
-import { saveBlob, supportsFsAccess } from "./save.js";
+import {
+  supportsFsAccess,
+  primeMru,
+  pickSaveFile,
+  writeToHandle,
+  downloadBlob,
+} from "./save.js";
 import { loadPrefs, savePrefs } from "./storage.js";
 
 const worker = new Worker(new URL("./tts.worker.js", import.meta.url), {
@@ -24,6 +30,7 @@ const el = {
   genStatus: $("gen-status"),
   genPercent: $("gen-percent"),
   genFill: $("gen-fill"),
+  bar: $("gen-bar"),
   waveform: $("waveform"),
   timeCurrent: $("time-current"),
   timeTotal: $("time-total"),
@@ -124,6 +131,44 @@ function setStatus(msg, kind) {
   el.status.dataset.kind = kind || "";
 }
 
+function setGenProgress(pct) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  el.genFill.style.width = `${clamped}%`;
+  el.genPercent.textContent = `${clamped}%`;
+  el.bar.setAttribute("aria-valuenow", String(clamped));
+}
+
+function clearGenProgress() {
+  el.genFill.style.width = "0%";
+  el.genPercent.textContent = "";
+  el.bar.setAttribute("aria-valuenow", "0");
+}
+
+function rejectPendingEncode() {
+  if (state.pendingEncode) {
+    state.pendingEncode.reject(
+      new DOMException("Audio was invalidated.", "AbortError"),
+    );
+    state.pendingEncode = null;
+  }
+}
+
+// Single source of truth for discarding generated audio: bumps the job id so
+// any in-flight worker result is ignored, rejects a pending MP3 encode so the
+// Save flow can't hang, tells the worker to drop its retained PCM, and returns
+// the UI to the idle state.
+function invalidateToIdle() {
+  state.jobId += 1;
+  rejectPendingEncode();
+  worker.postMessage({ type: "clear" });
+  resetAudio();
+  state.gen = "idle";
+  el.genProgress.classList.remove("active");
+  el.genStatus.textContent = "Idle";
+  clearGenProgress();
+  refreshTransport();
+}
+
 function startGeneration() {
   const text = el.text.value.trim();
   if (!text) return;
@@ -137,9 +182,8 @@ function startGeneration() {
   state.jobId += 1;
   el.generateLabel.textContent = "Generating…";
   el.genProgress.classList.add("active");
-  el.genFill.style.width = "0%";
   el.genStatus.textContent = "Preparing…";
-  el.genPercent.textContent = "";
+  clearGenProgress();
   setStatus("");
   refreshTransport();
 
@@ -155,12 +199,13 @@ function startGeneration() {
 function cancelGeneration() {
   if (state.gen !== "busy") return;
   worker.postMessage({ type: "cancel" });
+  worker.postMessage({ type: "clear" });
   state.jobId += 1; // any in-flight result for the old id is now stale
+  rejectPendingEncode();
   state.gen = "idle";
   el.genProgress.classList.remove("active");
   el.genStatus.textContent = "Cancelled";
-  el.genPercent.textContent = "";
-  el.genFill.style.width = "0%";
+  clearGenProgress();
   setStatus("Generation cancelled.", "");
   refreshTransport();
 }
@@ -190,18 +235,17 @@ worker.onmessage = (event) => {
 
   switch (msg.type) {
     case "progress": {
+      // Load progress carries no jobId; ignore it once we're no longer busy
+      // (e.g. the user cancelled while the model was still downloading).
+      if (state.gen !== "busy") break;
       if (msg.phase === "load") {
-        const pct = Math.round((msg.progress || 0) * 100);
         el.generateLabel.textContent = "Loading…";
         el.genStatus.textContent = "Downloading voice model…";
-        el.genPercent.textContent = `${pct}%`;
-        el.genFill.style.width = `${pct}%`;
+        setGenProgress((msg.progress || 0) * 100);
       } else if (msg.phase === "generate") {
-        const pct = Math.round((msg.done / msg.total) * 100);
         el.generateLabel.textContent = "Generating…";
         el.genStatus.textContent = `Generating speech… ${msg.done}/${msg.total}`;
-        el.genPercent.textContent = `${pct}%`;
-        el.genFill.style.width = `${pct}%`;
+        setGenProgress((msg.done / msg.total) * 100);
       }
       break;
     }
@@ -210,13 +254,16 @@ worker.onmessage = (event) => {
       break;
     }
     case "cancelled": {
-      state.gen = "idle";
-      el.genProgress.classList.remove("active");
-      el.genStatus.textContent = "Cancelled";
-      refreshTransport();
+      if (state.gen === "busy") {
+        state.gen = "idle";
+        el.genProgress.classList.remove("active");
+        el.genStatus.textContent = "Cancelled";
+        refreshTransport();
+      }
       break;
     }
     case "error": {
+      rejectPendingEncode();
       state.gen = "idle";
       el.genProgress.classList.remove("active");
       el.genStatus.textContent = "Error";
@@ -232,11 +279,21 @@ worker.onmessage = (event) => {
       }
       break;
     }
+    case "encodeError": {
+      if (state.pendingEncode && state.pendingEncode.jobId === msg.jobId) {
+        state.pendingEncode.reject(
+          new Error(msg.message || "MP3 encoding failed."),
+        );
+        state.pendingEncode = null;
+      }
+      break;
+    }
   }
 };
 
 worker.onerror = (e) => {
   setStatus(`Worker error: ${e.message || e}`, "error");
+  rejectPendingEncode();
   if (state.gen === "busy") {
     state.gen = "idle";
     el.genProgress.classList.remove("active");
@@ -261,12 +318,14 @@ function onAudioReady(msg) {
 
   el.backendVal.textContent = msg.backend === "webgpu" ? "WebGPU" : "WASM";
   el.genStatus.textContent = "Ready";
-  el.genPercent.textContent = "100%";
-  el.genFill.style.width = "100%";
+  setGenProgress(100);
   el.timeTotal.textContent = formatTime(state.duration);
   el.timeCurrent.textContent = "0:00";
   el.playerMsg.textContent = "Ready — press Play";
   el.waveform.classList.add("ready");
+  el.waveform.setAttribute("aria-valuemax", String(Math.round(state.duration)));
+  el.waveform.setAttribute("aria-valuenow", "0");
+  el.waveform.setAttribute("aria-valuetext", `0:00 of ${formatTime(state.duration)}`);
 
   sizeCanvas();
   drawWaveform(0);
@@ -293,8 +352,7 @@ audio.addEventListener("pause", () => {
 audio.addEventListener("ended", () => {
   stopPlayheadLoop();
   audio.currentTime = 0;
-  drawWaveform(0);
-  el.timeCurrent.textContent = "0:00";
+  updatePlaybackUi(0);
   refreshTransport();
 });
 
@@ -304,8 +362,7 @@ function startPlayheadLoop() {
   const tick = () => {
     const dur = state.duration || audio.duration || 0;
     const ratio = dur > 0 ? Math.min(1, audio.currentTime / dur) : 0;
-    drawWaveform(ratio);
-    el.timeCurrent.textContent = formatTime(audio.currentTime);
+    updatePlaybackUi(ratio);
     rafId = requestAnimationFrame(tick);
   };
   rafId = requestAnimationFrame(tick);
@@ -315,6 +372,17 @@ function stopPlayheadLoop() {
     cancelAnimationFrame(rafId);
     rafId = null;
   }
+}
+
+function updatePlaybackUi(ratio) {
+  drawWaveform(ratio);
+  const cur = ratio * (state.duration || 0);
+  el.timeCurrent.textContent = formatTime(cur);
+  el.waveform.setAttribute("aria-valuenow", String(Math.round(cur)));
+  el.waveform.setAttribute(
+    "aria-valuetext",
+    `${formatTime(cur)} of ${formatTime(state.duration)}`,
+  );
 }
 
 function resetAudio() {
@@ -330,6 +398,9 @@ function resetAudio() {
   state.peaks = null;
   state.duration = 0;
   el.waveform.classList.remove("ready");
+  el.waveform.setAttribute("aria-valuemax", "0");
+  el.waveform.setAttribute("aria-valuenow", "0");
+  el.waveform.setAttribute("aria-valuetext", "No audio");
   clearWaveform();
   el.timeCurrent.textContent = "0:00";
   el.timeTotal.textContent = "0:00";
@@ -389,16 +460,56 @@ function drawWaveform(progress) {
   }
 }
 
+function seekTo(seconds) {
+  if (state.gen !== "ready" || !state.duration) return;
+  const clamped = Math.min(state.duration, Math.max(0, seconds));
+  audio.currentTime = clamped;
+  updatePlaybackUi(clamped / state.duration);
+}
+
 function seekFromEvent(e) {
   if (state.gen !== "ready" || !state.duration) return;
   const rect = el.waveform.getBoundingClientRect();
-  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-  const ratio = Math.min(1, Math.max(0, x / rect.width));
-  audio.currentTime = ratio * state.duration;
-  drawWaveform(ratio);
-  el.timeCurrent.textContent = formatTime(audio.currentTime);
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  seekTo(ratio * state.duration);
 }
 el.waveform.addEventListener("click", seekFromEvent);
+
+el.waveform.addEventListener("keydown", (e) => {
+  if (state.gen !== "ready" || !state.duration) return;
+  const step = 5;
+  let handled = true;
+  switch (e.key) {
+    case "ArrowRight":
+    case "ArrowUp":
+      seekTo(audio.currentTime + step);
+      break;
+    case "ArrowLeft":
+    case "ArrowDown":
+      seekTo(audio.currentTime - step);
+      break;
+    case "PageUp":
+      seekTo(audio.currentTime + 15);
+      break;
+    case "PageDown":
+      seekTo(audio.currentTime - 15);
+      break;
+    case "Home":
+      seekTo(0);
+      break;
+    case "End":
+      seekTo(state.duration);
+      break;
+    case " ":
+    case "Enter":
+      togglePlay();
+      break;
+    default:
+      handled = false;
+  }
+  if (handled) e.preventDefault();
+});
 
 let resizeRaf = null;
 window.addEventListener("resize", () => {
@@ -430,48 +541,76 @@ function requestEncode(jobId) {
   });
 }
 
+async function prepareBlob(format, jobAtSave, mime) {
+  if (format === "mp3") {
+    el.saveLabel.textContent = "Encoding…";
+    const mp3 = await requestEncode(jobAtSave);
+    return new Blob([mp3], { type: mime });
+  }
+  return new Blob([state.wavBuffer], { type: mime });
+}
+
+function finishSave() {
+  el.saveLabel.textContent = "Save";
+  el.save.disabled = state.gen !== "ready";
+}
+
 async function onSave() {
   if (state.gen !== "ready" || !state.wavBuffer) return;
   const format = el.format.value;
-  const base = suggestedBaseName();
+  const ext = format === "mp3" ? "mp3" : "wav";
+  const mime = format === "mp3" ? "audio/mpeg" : "audio/wav";
+  const filename = `${suggestedBaseName()}.${ext}`;
+  const jobAtSave = state.jobId;
 
-  el.save.disabled = true;
-  let blob, ext, mime;
-  try {
-    if (format === "mp3") {
-      el.saveLabel.textContent = "Encoding…";
-      const mp3 = await requestEncode(state.jobId);
-      blob = new Blob([mp3], { type: "audio/mpeg" });
-      ext = "mp3";
-      mime = "audio/mpeg";
-    } else {
-      blob = new Blob([state.wavBuffer], { type: "audio/wav" });
-      ext = "wav";
-      mime = "audio/wav";
+  // Path A: File System Access API. The picker MUST run before any await so the
+  // click's transient user activation is still valid; only then do we encode.
+  if (supportsFsAccess()) {
+    let handle;
+    try {
+      handle = await pickSaveFile(filename, mime, ext);
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        setStatus("Save cancelled.", "");
+        return;
+      }
+      handle = null; // fall through to download
     }
-  } catch (e) {
-    el.saveLabel.textContent = "Save";
-    el.save.disabled = false;
-    setStatus(`Could not prepare ${format.toUpperCase()}: ${e.message || e}`, "error");
-    return;
+    if (handle) {
+      el.save.disabled = true;
+      try {
+        const blob = await prepareBlob(format, jobAtSave, mime);
+        el.saveLabel.textContent = "Saving…";
+        await writeToHandle(handle, blob);
+        setStatus(`Saved “${handle.name}”.`, "ok");
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          setStatus("Save cancelled — the text changed before saving.", "");
+        } else {
+          setStatus(`Save failed: ${(e && e.message) || e}`, "error");
+        }
+      } finally {
+        finishSave();
+      }
+      return;
+    }
   }
 
-  el.saveLabel.textContent = "Saving…";
-  const res = await saveBlob(blob, `${base}.${ext}`, mime, ext);
-
-  el.saveLabel.textContent = "Save";
-  el.save.disabled = false;
-
-  if (res.cancelled) {
-    setStatus("Save cancelled.", "");
-  } else if (res.method === "fs") {
-    setStatus(`Saved “${res.name}”.`, "ok");
-  } else if (res.degraded) {
-    setStatus(`Saved to your downloads folder (couldn't use the picker).`, "");
-  } else if (res.method === "download") {
-    setStatus(`Downloaded “${res.name}”.`, "ok");
-  } else if (res.error) {
-    setStatus(res.error, "error");
+  // Path B: download fallback (no FS Access API, or the picker was unavailable).
+  el.save.disabled = true;
+  try {
+    const blob = await prepareBlob(format, jobAtSave, mime);
+    el.saveLabel.textContent = "Saving…";
+    downloadBlob(blob, filename);
+    setStatus(`Downloaded “${filename}”.`, "ok");
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      setStatus("Save cancelled — the text changed before saving.", "");
+    } else {
+      setStatus(`Save failed: ${(e && e.message) || e}`, "error");
+    }
+  } finally {
+    finishSave();
   }
 }
 el.save.addEventListener("click", onSave);
@@ -480,23 +619,22 @@ el.save.addEventListener("click", onSave);
 
 el.text.addEventListener("input", () => {
   if (state.gen === "ready") {
-    resetAudio();
-    state.gen = "idle";
-    el.genProgress.classList.remove("active");
-    el.genStatus.textContent = "Idle";
-    el.genPercent.textContent = "";
-    el.genFill.style.width = "0%";
+    invalidateToIdle();
   } else if (state.gen === "busy") {
     cancelGeneration();
   }
   updateCharCount();
 });
 
-el.speed.addEventListener("input", () => {
-  updateSpeedLabel();
+el.speed.addEventListener("input", updateSpeedLabel);
+el.speed.addEventListener("change", () => {
   persistPrefs();
+  if (state.gen === "ready") invalidateToIdle();
 });
-el.voice.addEventListener("change", persistPrefs);
+el.voice.addEventListener("change", () => {
+  persistPrefs();
+  if (state.gen === "ready") invalidateToIdle();
+});
 el.format.addEventListener("change", persistPrefs);
 
 /* ---------- utils ---------- */
@@ -515,7 +653,9 @@ restorePrefs();
 updateCharCount();
 sizeCanvas();
 clearWaveform();
-if (!supportsFsAccess()) {
+if (supportsFsAccess()) {
+  primeMru();
+} else {
   el.playerMsg.title =
     "Your browser will save to the downloads folder. For a remembered save location, use a Chromium-based browser.";
 }

@@ -34,15 +34,36 @@ export function computePeaks(samples, buckets) {
 }
 
 // Deterministic sentence/word chunking so generation progress is exact.
+// Uses Intl.Segmenter (keeps decimals like "3.14" and many abbreviations
+// intact) with a regex fallback, then hard-caps very long runs on word
+// boundaries so a single chunk never grows unbounded.
 export function splitText(text) {
   const clean = (text || "").replace(/\s+/g, " ").trim();
   if (!clean) return [];
-  const rough =
-    clean.match(/[^.!?…]+[.!?…]+["')\]]*(?:\s|$)|[^.!?…]+$/g) || [clean];
+
+  let sentences = null;
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    try {
+      const seg = new Intl.Segmenter(undefined, { granularity: "sentence" });
+      sentences = [...seg.segment(clean)]
+        .map((s) => s.segment.trim())
+        .filter(Boolean);
+    } catch {
+      sentences = null;
+    }
+  }
+  if (!sentences || sentences.length === 0) {
+    sentences = (
+      clean.match(/[^.!?…]+[.!?…]+["')\]]*(?:\s|$)|[^.!?…]+$/g) || [clean]
+    )
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   const MAX = 300;
   const out = [];
-  for (const segment of rough) {
-    let t = segment.trim();
+  for (const segment of sentences) {
+    let t = segment;
     while (t.length > MAX) {
       let cut = t.lastIndexOf(" ", MAX);
       if (cut <= 0) cut = MAX;

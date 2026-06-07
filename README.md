@@ -1,7 +1,9 @@
 # JustSayIt
 
-Turn pasted text into spoken audio — generated **100% locally in your browser**.
-Nothing you type or generate is ever uploaded. JustSayIt runs the
+Turn pasted text into spoken audio, generated **locally in your browser**. Your
+text and the generated audio never leave your machine — the only network
+requests are one‑time downloads of the speech model (from Hugging Face / its CDN)
+and the web fonts (from Google Fonts). JustSayIt runs the
 [Kokoro‑82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) speech
 model on your own machine via [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js)
 and [Transformers.js](https://huggingface.co/docs/transformers.js).
@@ -14,8 +16,9 @@ and [Transformers.js](https://huggingface.co/docs/transformers.js).
   your most‑recently‑used directory, both within a session and on future visits.
 - **Progress for both phases** — a bar for generation, and a live waveform seek bar for playback.
 - **28 voices** (American/British, male/female) and an adjustable speaking rate.
-- **Private by design.** Open your browser's network tab: after the one‑time model
-  download, no audio or text leaves the page.
+- **Private by design.** Your text and the generated audio are never sent
+  anywhere. The only outbound requests are the one‑time model and font downloads
+  from public CDNs; a Content‑Security‑Policy restricts where the page may connect.
 
 ## How it works
 
