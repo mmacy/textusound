@@ -71,8 +71,17 @@ export async function writeToHandle(handle, blob) {
     );
   }
   const writable = await handle.createWritable();
-  await writable.write(blob);
-  await writable.close();
+  try {
+    await writable.write(blob);
+    await writable.close();
+  } catch (e) {
+    try {
+      await writable.abort();
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
   mruHandle = handle;
   idbSet(HANDLE_KEY, handle).catch(() => {});
 }

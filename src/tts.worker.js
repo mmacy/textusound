@@ -219,12 +219,19 @@ self.onmessage = (event) => {
     case "generate":
       // Mark this as the active job synchronously so any in-flight generation
       // bails at its next chunk boundary, then queue this one so generate()
-      // calls never overlap on the shared model instance.
+      // calls never overlap on the shared model instance. The trailing catch
+      // keeps the queue alive if a job throws unexpectedly.
       state.currentJobId = msg.jobId;
       state.cancelRequested = false;
-      state.genChain = state.genChain.then(() =>
-        handleGenerate(msg.jobId, msg.text, msg.voice, msg.speed),
-      );
+      state.genChain = state.genChain
+        .then(() => handleGenerate(msg.jobId, msg.text, msg.voice, msg.speed))
+        .catch((e) => {
+          post({
+            type: "error",
+            jobId: msg.jobId,
+            message: "Generation failed. " + ((e && e.message) || e),
+          });
+        });
       break;
     case "cancel":
       state.cancelRequested = true;

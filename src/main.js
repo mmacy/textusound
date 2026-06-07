@@ -49,6 +49,8 @@ const state = {
   duration: 0,
   audioUrl: null,
   pendingEncode: null, // { jobId, resolve, reject }
+  mp3: null, // { jobId, bytes } cached MP3 for the current audio
+  mp3Promise: null, // { jobId, promise } in-flight MP3 encode
 };
 
 const audio = new Audio();
@@ -151,6 +153,8 @@ function rejectPendingEncode() {
     );
     state.pendingEncode = null;
   }
+  state.mp3 = null;
+  state.mp3Promise = null;
 }
 
 // Single source of truth for discarding generated audio: bumps the job id so
@@ -331,6 +335,7 @@ function onAudioReady(msg) {
   drawWaveform(0);
   refreshTransport();
   setStatus("");
+  if (el.format.value === "mp3") prefetchMp3();
 }
 
 function togglePlay() {
@@ -541,10 +546,38 @@ function requestEncode(jobId) {
   });
 }
 
+// Encode MP3 at most once per generation, reusing an in-flight or cached
+// result. Pre-fetching when audio is ready means the bytes are usually present
+// before the user clicks Save, so the FS picker isn't followed by a long await.
+function ensureMp3(jobId) {
+  if (state.mp3 && state.mp3.jobId === jobId) {
+    return Promise.resolve(state.mp3.bytes);
+  }
+  if (state.mp3Promise && state.mp3Promise.jobId === jobId) {
+    return state.mp3Promise.promise;
+  }
+  const promise = requestEncode(jobId).then((bytes) => {
+    if (state.jobId === jobId) state.mp3 = { jobId, bytes };
+    if (state.mp3Promise && state.mp3Promise.jobId === jobId) {
+      state.mp3Promise = null;
+    }
+    return bytes;
+  });
+  state.mp3Promise = { jobId, promise };
+  return promise;
+}
+
+function prefetchMp3() {
+  if (state.gen !== "ready") return;
+  ensureMp3(state.jobId).catch(() => {
+    /* a failed/aborted prefetch is retried on demand at save time */
+  });
+}
+
 async function prepareBlob(format, jobAtSave, mime) {
   if (format === "mp3") {
     el.saveLabel.textContent = "Encoding…";
-    const mp3 = await requestEncode(jobAtSave);
+    const mp3 = await ensureMp3(jobAtSave);
     return new Blob([mp3], { type: mime });
   }
   return new Blob([state.wavBuffer], { type: mime });
@@ -578,16 +611,35 @@ async function onSave() {
     }
     if (handle) {
       el.save.disabled = true;
+      let blob;
       try {
-        const blob = await prepareBlob(format, jobAtSave, mime);
-        el.saveLabel.textContent = "Saving…";
+        blob = await prepareBlob(format, jobAtSave, mime);
+      } catch (e) {
+        finishSave();
+        if (e && e.name === "AbortError") {
+          setStatus(
+            "Save cancelled — the text changed before saving. You can delete the empty file your browser created.",
+            "",
+          );
+        } else {
+          setStatus(`Save failed: ${(e && e.message) || e}`, "error");
+        }
+        return;
+      }
+      el.saveLabel.textContent = "Saving…";
+      try {
         await writeToHandle(handle, blob);
         setStatus(`Saved “${handle.name}”.`, "ok");
       } catch (e) {
         if (e && e.name === "AbortError") {
-          setStatus("Save cancelled — the text changed before saving.", "");
+          setStatus("Save cancelled.", "");
         } else {
-          setStatus(`Save failed: ${(e && e.message) || e}`, "error");
+          // Don't lose the audio: fall back to a download.
+          downloadBlob(blob, filename);
+          setStatus(
+            `Couldn't write to that location — downloaded “${filename}” instead.`,
+            "",
+          );
         }
       } finally {
         finishSave();
@@ -635,7 +687,10 @@ el.voice.addEventListener("change", () => {
   persistPrefs();
   if (state.gen === "ready") invalidateToIdle();
 });
-el.format.addEventListener("change", persistPrefs);
+el.format.addEventListener("change", () => {
+  persistPrefs();
+  if (el.format.value === "mp3") prefetchMp3();
+});
 
 /* ---------- utils ---------- */
 
