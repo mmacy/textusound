@@ -277,9 +277,6 @@ body {
   color: var(--faint);
   letter-spacing: 0.06em;
 }
-.char-count.over {
-  color: var(--rec);
-}
 .hint {
   color: var(--faint);
   letter-spacing: 0.04em;

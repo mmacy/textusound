@@ -48,8 +48,6 @@ const el = {
   undo: $("tidy-undo"),
 };
 
-const MAX_CHARS = 8000;
-
 const state = {
   gen: "idle", // idle | busy | ready
   jobId: 0,
@@ -338,8 +336,7 @@ function updateSpeedLabel() {
 
 function updateCharCount() {
   const n = el.text.value.length;
-  el.charCount.textContent = `${n.toLocaleString()} / ${MAX_CHARS.toLocaleString()}`;
-  el.charCount.classList.toggle("over", n > MAX_CHARS);
+  el.charCount.textContent = `${n.toLocaleString()} ${n === 1 ? "character" : "characters"}`;
   refreshTidyLamp();
   refreshTransport();
 }
@@ -410,10 +407,6 @@ function invalidateToIdle() {
 function startGeneration() {
   const text = el.text.value.trim();
   if (!text) return;
-  if (text.length > MAX_CHARS) {
-    setStatus(`Text is too long. Keep it under ${MAX_CHARS} characters.`, "error");
-    return;
-  }
 
   resetAudio();
   state.gen = "busy";
