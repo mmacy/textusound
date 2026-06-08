@@ -31,7 +31,7 @@ served build, not just source.
 | `src/main.js` | UI orchestration: state machine, worker wiring, waveform rendering, playback, paste/manual text tidying, and the save flow. |
 | `src/tts.worker.js` | All inference. Loads the model, chunks text, generates per chunk, builds the WAV. |
 | `src/audio.js` | Pure helpers: `tidyText`/`tidyReport` (clean pasted text), `concatFloat32`, `silence`, `computePeaks`, `floatToWav`. Imported by the worker and `main.js`. |
-| `src/chunk.js` | Text → sentence chunks for generation: kokoro `TextSplitterStream` + a word-boundary safety cap below the model's token limit. Imported by the worker only (keeps kokoro-js out of the main-thread bundle). |
+| `src/chunk.js` | Text → chunks for generation: splits on blank-line paragraph breaks first (each paragraph/heading becomes its own group), then kokoro `TextSplitterStream` per paragraph + a word-boundary safety cap below the model's token limit. Returns `[{ text, paragraphBreakBefore }]`. Imported by the worker only (keeps kokoro-js out of the main-thread bundle). |
 | `src/save.js` | File System Access API save + MRU directory persistence, with a download fallback. |
 | `src/storage.js` | IndexedDB (handle persistence) and `localStorage` (prefs). |
 | `src/voices.js` | The 28-voice list used to build the picker. |
@@ -56,6 +56,23 @@ Worker → main:
 - `{ type: "done", jobId, wav, peaks, sampleRate, duration, backend }` — `wav` (ArrayBuffer) and `peaks` (Float32Array) are **transferred**
 - `{ type: "cancelled", jobId }`
 - `{ type: "error", jobId, message }`
+
+### Chunking & pauses
+
+Kokoro speaks each generated chunk as **one continuous breath**; the only pauses
+in the output are the `silence(...)` segments the worker splices *between* chunks.
+There is no in-text "pause" token — separation comes entirely from where the text
+is split. This mirrors kokoro's own design: its `TextSplitterStream` treats `\n`
+as a sentence terminator, and the reference Python pipeline splits input on `\n+`.
+
+So `chunkText` keeps paragraph structure instead of collapsing all whitespace:
+blank lines split paragraphs (and standalone lines such as headings) into separate
+chunks, while lone newlines inside a paragraph are flattened to spaces so
+hard-wrapped prose (e.g. PDF copies) isn't chopped mid-sentence. The worker then
+renders a longer pause (`PARAGRAPH_SILENCE`) at paragraph boundaries than between
+sentences (`INTER_CHUNK_SILENCE`), keyed off each chunk's `paragraphBreakBefore`.
+Collapsing newlines before chunking glues a heading onto the next paragraph's
+first sentence — that was the original run-on bug.
 
 ## Invariants — do not break these
 
@@ -82,6 +99,11 @@ Worker → main:
    worker/WASM are referenced via `new URL(..., import.meta.url)` so the app
    works under the GitHub Pages project subpath. Don't hardcode absolute paths.
 7. **Revoke object URLs** when replacing or discarding audio (`resetAudio`).
+8. **Paragraph breaks must survive to the worker.** `chunkText` returns
+   `[{ text, paragraphBreakBefore }]` and must keep blank-line boundaries intact
+   (never collapse all whitespace), or headings and paragraphs run together in the
+   audio. The worker reads `chunk.text` and uses `paragraphBreakBefore` to choose
+   the inter-chunk silence — keep that object shape in sync across both files.
 
 ## Conventions
 

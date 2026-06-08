@@ -9,7 +9,8 @@ import { chunkText } from "./chunk.js";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const SAMPLE_RATE = 24000;
-const INTER_CHUNK_SILENCE = 0.18; // seconds between sentences
+const INTER_CHUNK_SILENCE = 0.18; // seconds between sentences in a paragraph
+const PARAGRAPH_SILENCE = 0.5; // seconds between paragraphs and around headings
 const WAVEFORM_BUCKETS = 1600;
 
 const state = {
@@ -148,9 +149,14 @@ async function handleGenerate(jobId, text, voice, speed) {
       return;
     }
     try {
-      const audio = await state.tts.generate(chunks[i], { voice, speed });
+      const audio = await state.tts.generate(chunks[i].text, { voice, speed });
       parts.push(audio.audio);
-      if (i < total - 1) parts.push(silence(INTER_CHUNK_SILENCE, SAMPLE_RATE));
+      if (i < total - 1) {
+        const gap = chunks[i + 1].paragraphBreakBefore
+          ? PARAGRAPH_SILENCE
+          : INTER_CHUNK_SILENCE;
+        parts.push(silence(gap, SAMPLE_RATE));
+      }
     } catch (e) {
       post({
         type: "error",
