@@ -8,6 +8,8 @@ and the web fonts (from Google Fonts). Textusound runs the
 model on your own machine via [kokoro-js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js)
 and [Transformers.js](https://huggingface.co/docs/transformers.js).
 
+![The Textusound browser UI: a script text box with sample copy, ENGINE WebGPU and PRIVACY LOCAL badges, a voice selector set to "Heart" and a speaking-rate slider, Pause and Save controls, a generation progress bar at 100%, and a playback waveform at 0:04 of 0:14.](docs/textusound.png)
+
 ## Features
 
 - **Paste text → speech.** A single transport control: **Generate** → **Generating…** → **Play**.
